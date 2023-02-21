@@ -19,6 +19,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -211,6 +212,6 @@ func (c fileConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	g := c.GatherWithContext(ctx, r, c.Path + path)
+	g := c.GatherWithContext(ctx, r, c.Path + filepath.FromSlash(path))
 	promhttp.HandlerFor(g, promhttp.HandlerOpts{}).ServeHTTP(w, r)
 }
