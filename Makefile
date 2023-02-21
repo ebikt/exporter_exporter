@@ -1,11 +1,15 @@
 GITHUB_ORG  = QubitProducts
 GITHUB_REPO = exporter_exporter
-VERSION      = 0.4.5
+VERSION      = 0.4.5.file
 
-DOCKER_REGISTRY     = qubitproducts
+DOCKER_ARCHS:=amd64 i386
+DEBIAN_DISTS:=bullseye
+GO_FLAVORS:=alpine $(DEBIAN_DISTS)
+
+# alpine//latest-alpine debian/bullseye-bullseye scratch-alpine scratch-bullseye
+DOCKER_FULL_DISTS:=alpine//latest-alpine $(foreach DIST, $(DEBIAN_DISTS),debian//$(DIST)-$(DIST)) $(addprefix scratch-, $(GO_FLAVORS))
+
 DOCKER_NAME         = exporter_exporter
-DOCKER_IMAGE        = $(DOCKER_REGISTRY)/$(DOCKER_NAME):$(VERSION)
-DOCKER_IMAGE_LATEST = $(DOCKER_REGISTRY)/$(DOCKER_NAME):latest
 
 SHELL        := /usr/bin/env bash
 GO           := go
@@ -89,14 +93,39 @@ $(PACKAGE_FILE): prepare-package
 	  -p ../$(PACKAGE_FILE) \
 	  .
 
-.PHONY: build-docker release-docker
-build-docker:
-	docker build -t $(DOCKER_IMAGE) .
+# build-docker-$(DIST)-$(ARCH), where DIST is one of: alpine//latest-alpine debian/bullseye-bullseye scratch-alpine scratch-bullseye
+DOCKER_FULL_DESTS:=$(foreach DIST, $(DOCKER_FULL_DISTS), $(addprefix build-docker-$(DIST)-, $(DOCKER_ARCHS)))
+.PHONY: $(DOCKER_FULL_DESTS)
+$(DOCKER_FULL_DESTS): build-docker-%:
+	eval '$(join BASEDIST= FLAVOR= ARCH=,$(subst -, ,$(subst //,:,$*)))' ; \
+	case $$BASEDIST in \
+		scratch) \
+			PREFIX=scratch-$$FLAVOR-$$ARCH ; \
+		;; \
+		*) \
+			PREFIX=$$FLAVOR-$$ARCH ; \
+			BASEDIST=$$ARCH/$$BASEDIST ; \
+		;; \
+	esac ; \
+	docker build -t $$PREFIX/$(DOCKER_NAME):$(VERSION) --build-arg ARCH=$$ARCH --build-arg FLAVOR=$$FLAVOR --build-arg BASEDIST=$$BASEDIST .
 
-release-docker: build-docker
-	docker push $(DOCKER_IMAGE)
-	docker tag $(DOCKER_IMAGE) $(DOCKER_IMAGE_LATEST)
-	docker push $(DOCKER_IMAGE_LATEST)
+# build-docker-$(DIST), where DIST is one of: alpine//latest-alpine debian/bullseye-bullseye scratch-alpine scratch-bullseye
+.PHONY: $(addprefix build-docker-, $(DOCKER_FULL_DISTS))
+$(addprefix build-docker-, $(DOCKER_FULL_DISTS)): build-docker-%: $(addprefix build-docker-%-, $(DOCKER_ARCHS))
+
+
+# build-docker-$(FLAVOR)-$(ARCH), where FLAVOR is one of: alpine bullseye
+DOCKER_SHORT_DESTS:=$(foreach FLAVOR, $(GO_FLAVORS), $(addprefix build-docker-$(FLAVOR)-, $(DOCKER_ARCHS)))
+.PHONY: $(DOCKER_SHORT_DESTS)
+
+$(addprefix build-docker-alpine-, $(DOCKER_ARCHS)): build-docker-alpine-%: build-docker-alpine//latest-alpine-%
+.SECONDEXPANSION:
+$(foreach DIST, $(DEBIAN_DISTS), $(addprefix build-docker-$(DIST)-, $(DOCKER_ARCHS))): build-docker-%: build-docker-debian//$$(word 1,$$(subst -, ,$$*))-$$*
+
+# build-docker-$(ARCH) build-docker-$(FLAVOR), where FLAVOR is one of: alpine bullseye
+.PHONY: $(addprefix build-docker-, $(DOCKER_ARCHS)) $(addprefix build-docker-, $(GO_FLAVORS))
+$(addprefix build-docker-, $(DOCKER_ARCHS)): build-docker-%: build-docker-alpine-%
+$(addprefix build-docker-, $(GO_FLAVORS)): build-docker-%: $(addprefix build-docker-%-, $(DOCKER_ARCHS))
 
 LDFLAGS = -X main.Version=$(VERSION) \
 					-X main.Branch=$(BRANCH) \
@@ -132,6 +161,20 @@ build/$(BINNAME)-$(VERSION).%-arm64.tar.gz: build/$(BINNAME)-$(VERSION).%-arm64/
 build/$(BINNAME)-$(VERSION).%-amd64.tar.gz: build/$(BINNAME)-$(VERSION).%-amd64/$(BINNAME)
 	cd build && \
 		tar cfzv $(BINNAME)-$(VERSION).$*-amd64.tar.gz $(BINNAME)-$(VERSION).$*-amd64
+
+# build-scratch/$(FLAVOR)-$(ARCH)/exporter_exporter
+$(foreach FLAVOR, $(GO_FLAVORS), $(addprefix build-scratch/$(FLAVOR)-, $(addsuffix /$(BINNAME), $(DOCKER_ARCHS)))): build-scratch/%/$(BINNAME): build-docker-scratch-%
+	mkdir -p $(dir $@)
+	docker save scratch-$*/exporter_exporter:$(VERSION) | tar --wildcards -Ox '*.tar' | tar -Ox usr/bin/exporter_exporter > $@
+
+# build-scratch-$(FLAVOR)-$(ARCH)
+DOCKER_SCRATCH_DESTS:=$(foreach FLAVOR, $(GO_FLAVORS), $(addprefix build-scratch-$(FLAVOR)-, $(DOCKER_ARCHS)))
+.PHONY: $(DOCKER_SCRATCH_DESTS)
+$(DOCKER_SCRATCH_DESTS): build-scratch-%: build-scratch/%/$(BINNAME)
+
+# build-scratch-$(FLAVOR)
+.PHONY: $(addprefix build-scratch-, $(GO_FLAVORS))
+$(addprefix build-scratch-, $(GO_FLAVORS)): build-scratch-%: $(addprefix build-scratch-%-, $(DOCKER_ARCHS))
 
 package: $(PACKAGE_FILE)
 
