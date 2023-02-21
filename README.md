@@ -99,6 +99,20 @@ modules:
       env:
         THING: "1"
         THING2: "2"
+
+  somefile:
+    method: file
+    file:
+      path: /tmp/myflie.prometheus.txt
+      use_mtime: true
+
+  # query with &path=relative_path argument, it will be appended to path by forward slash
+  # Note that empty `allow` means "^$", i.e., empty string
+  somedir:
+    method: file
+    file:
+      path: /tmp/mydir
+      allow: "^(foo.txt|bar.txt)$"
 ```
 
 In your prometheus configuration

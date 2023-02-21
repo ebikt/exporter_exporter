@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"regexp"
 	"net/http"
 	"net/http/httputil"
 	"time"
@@ -45,6 +46,7 @@ type moduleConfig struct {
 
 	Exec execConfig `yaml:"exec"`
 	HTTP httpConfig `yaml:"http"`
+	File fileConfig `yaml:"file"`
 
 	name string
 }
@@ -75,6 +77,14 @@ type execConfig struct {
 	Env     map[string]string      `yaml:"env"`
 	XXX     map[string]interface{} `yaml:",inline"`
 
+	mcfg *moduleConfig
+}
+
+type fileConfig struct {
+	Path      string                 `yaml:"path"`
+	AllowStr  string                 `yaml:"allow"`
+	UseMtime  bool                   `yaml:"use_mtime"`
+	AllowRe   *regexp.Regexp
 	mcfg *moduleConfig
 }
 
@@ -167,6 +177,16 @@ func checkModuleConfig(name string, cfg *moduleConfig) error {
 	case "exec":
 		if len(cfg.Exec.XXX) != 0 {
 			return fmt.Errorf("Unknown exec module configuration fields: %v", cfg.Exec.XXX)
+		}
+	case "file":
+		var err error
+		if cfg.File.AllowStr == "" {
+			cfg.File.AllowRe, err = nil, nil
+		} else {
+			cfg.File.AllowRe, err = regexp.Compile(cfg.File.AllowStr)
+		}
+		if err != nil {
+			return fmt.Errorf("Invalid regexp for `allow` entry: %w", err)
 		}
 	default:
 		return fmt.Errorf("Unknown module method: %v", cfg.Method)
